@@ -44,26 +44,16 @@ project(${ProjectId} LANGUAGES CXX VERSION ${PROJECT_VERSION})
 # set project maintainer and contact
 set(PROJECT_MAINTAINER "OhtoAi")
 set(PROJECT_CONTACT "zhu.thatboy@outlook.com")
-set(PROJECT_DESCRIPTION "A cmake project template")
+set(PROJECT_DESCRIPTION "ws2812 client")
 set(PROJECT_DEBIAN_DEPENDENCIES "libssl1.1 (>= 1.1.0)")
-set(PROJECT_HOMEPAGE "https://github.com/Ohto-Ai/CMakeProjectTemplate/")
+set(PROJECT_HOMEPAGE "https://ohtoai.top/")
 
 # trans project name
 string(TOUPPER ${PROJECT_NAME} PROJECT_NAME_VAR)
 string(REPLACE "-" "_" PROJECT_NAME_VAR ${PROJECT_NAME_VAR})
 
-# platform specific settings
-if(WINDOWS)
-    set(BINARY_PATH "bin/${PROJECT_NAME}.exe")
-else()
-    set(BINARY_PATH "bin/${PROJECT_NAME}")
-endif()
-
 # configure .in file
-configure_file(
-    inc/version.h.in
-    generated/inc/version.h
-)
+configure_file(inc/version.h.in ${CMAKE_BINARY_DIR}/inc/version.h @ONLY)
 
 # Add source files
 set(SOURCES
@@ -74,26 +64,34 @@ set(SOURCES
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 # Add include directories
-target_include_directories(${PROJECT_NAME} PRIVATE inc)
-target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_BINARY_DIR}/generated/inc)
+target_include_directories(${PROJECT_NAME} PRIVATE inc ../3rd/rpi_ws281x)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
+    scn::scn
     Threads::Threads
-    $<$<BOOL:${HTTPLIB_IS_USING_OPENSSL}>:OpenSSL::SSL>
-    $<$<BOOL:${HTTPLIB_IS_USING_OPENSSL}>:OpenSSL::Crypto>
+    $<$<BOOL:${OpenSSL_FOUND}>:OpenSSL::SSL>
+    $<$<BOOL:${OpenSSL_FOUND}>:OpenSSL::Crypto>
+    nlohmann_json
+    argparse
+    tabulate
+    eventpp
+    yaml-cpp
+    ws2811
     spdlog $<$<BOOL:${MINGW}>:ws2_32>)
 
-install(TARGETS ${PROJECT_NAME} CONFIGURATIONS Release RUNTIME DESTINATION bin)
+include(InstallRequiredSystemLibraries)
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
+install(FILES ${CMAKE_SOURCE_DIR}/README.md DESTINATION .)
 
 # set install target
 if (LINUX OR WINDOWS)
-    install(TARGETS ${PROJECT_NAME})
     if(LINUX)
         set(CPACK_GENERATOR "DEB")
         set(CPACK_DEBIAN_PACKAGE_NAME ${PROJECT_NAME})
         set(CPACK_DEBIAN_PACKAGE_MAINTAINER ${PROJECT_MAINTAINER})
         set(CPACK_DEBIAN_PACKAGE_DEPENDS ${PROJECT_DEBIAN_DEPENDENCIES})
         set(CPACK_DEBIAN_PACKAGE_HOMEPAGE ${PROJECT_HOMEPAGE})
+        set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE ${CMAKE_SYSTEM_PROCESSOR})
     elseif(WINDOWS)
         set(CPACK_GENERATOR "NSIS")
         set(CPACK_NSIS ${PROJECT_NAME})
@@ -111,12 +109,6 @@ if (LINUX OR WINDOWS)
     set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
     set(CPACK_PACKAGE_CONTACT ${PROJECT_CONTACT})
     set(CPACK_PACKAGE_DESCRIPTION ${PROJECT_DESCRIPTION})
-    set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
-    set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
-    if(PROJECT_VERSION_TWEAK)
-        set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH}.${PROJECT_VERSION_TWEAK})
-    else()
-        set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
-    endif(PROJECT_VERSION_TWEAK)
+    set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
     include(CPack)
 endif()

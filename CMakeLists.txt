@@ -16,8 +16,11 @@ elseif(UNIX)
     set(LINUX TRUE)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard" FORCE)
 set(SOURCE_FOLDER ${PROJECT_SOURCE_DIR}/src CACHE STRING "Source folder")
+if(MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")
+endif()
 if(WINDOWS)
     set(OPENSSL_ROOT_DIR "C:/Program Files/OpenSSL" "C:/Program Files/OpenSSL-Win64" CACHE STRING "openssl root" FORCE)
     add_compile_definitions(WIN32_LEAN_AND_MEAN)
@@ -38,6 +41,7 @@ find_package(Threads REQUIRED)
 
 # include top level include directory
 include_directories(${PROJECT_SOURCE_DIR}/inc)
+include_directories(${PROJECT_BINARY_DIR}/inc)
 
 add_subdirectory(3rd)
 add_subdirectory(src)

@@ -1,0 +1,9 @@
+[submodule "3rd/rpi_ws281x"]
+	path = 3rd/rpi_ws281x
+	url = https://github.com/jgarff/rpi_ws281x
+[submodule "3rd/spdlog"]
+	path = 3rd/spdlog
+	url = https://github.com/gabime/spdlog
+[submodule "3rd/catch2"]
+	path = 3rd/catch2
+	url = https://github.com/catchorg/Catch2
