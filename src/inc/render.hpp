@@ -97,14 +97,13 @@ namespace ohtoai::rpi {
 
     class IPaintDevice: public IPaintSource {
     public:
-        enum {
-            ROP_SRC_COPY = 0,
-        };
-    public:
         IPaintDevice() = default;
         virtual ~IPaintDevice() = default;
         virtual LedColor& led(int x, int y) = 0;
         virtual const LedColor& led(int x, int y) const = 0;
+        virtual void set_transparent(bool transparent) {
+            transparent_ = transparent;
+        }
 
         virtual void set_background(LedColor color) {
             back_ = color;
@@ -118,23 +117,26 @@ namespace ohtoai::rpi {
             }
         }
         
-        virtual void draw(const IPaintSource& src, int x, int y, std::uint32_t rop = ROP_SRC_COPY) {
-            for (int sy = 0; sy < src.height() && y + sy < height(); ++sy) {
-                for (int sx = 0; sx < src.width() && x + sx < width(); ++sx) {
-                    led(x + sx, y + sy) = src.led(sx, sy);
-                }
-            }
+        virtual void draw(const IPaintSource& src, int x, int y) {
+            draw(src, x, y, false, false);
         }
         
         virtual void draw(const IPaintSource& src, int x, int y, bool flip_x, bool flip_y) {
             for (int sy = 0; sy < src.height(); ++sy) {
+                int dy = flip_y ? src.height() - sy - 1 : sy;
+                if (y + dy >= height()) {
+                    continue;
+                }
                 for (int sx = 0; sx < src.width(); ++sx) {
                     int dx = flip_x ? src.width() - sx - 1 : sx;
-                    int dy = flip_y ? src.height() - sy - 1 : sy;
-                    if (x + dx >= width() || y + dy >= height()) {
+                    if (x + dx >= width()) {
                         continue;
                     }
-                    led(x + dx, y + dy) = src.led(sx, sy);
+                    auto src_led = src.led(sx, sy);
+                    if (transparent_ && src_led == back_) {
+                        continue;
+                    }
+                    led(x + dx, y + dy) = src_led;
                 }
             }
         }
@@ -152,6 +154,7 @@ namespace ohtoai::rpi {
         }
 
     protected:
+        bool transparent_ = false;
         LedColor back_ = Led::Black;
     };
 
@@ -254,8 +257,8 @@ namespace ohtoai::rpi {
         }
     protected:
         std::shared_ptr<IStripRotateHelper<StripIndexType>> rotate_helper_ = nullptr;
-        const int width_ = 0;
-        const int height_ = 0;
+        int width_ = 0;
+        int height_ = 0;
         int logic_width_ = 0;
         int logic_height_ = 0;
     };
@@ -302,6 +305,7 @@ namespace ohtoai::rpi {
     };
 
     class Ascii4x8 : public IPaintSource {
+        friend class Text4x8;
     public:
         Ascii4x8(char c, LedColor color = Led::White, LedColor back = Led::Black) : c_(c), color_(color), back_(back) {}
         int width() const override { return 4; }
@@ -313,44 +317,49 @@ namespace ohtoai::rpi {
             throw std::out_of_range("Ascii4x8::led");
         }
 
+        auto& set_color(LedColor color) { 
+            color_ = color; 
+            return *this;
+        }
+
         char& c() { return c_; }
         char c() const { return c_; }
     private:
-        static inline const uint32_t ascii4x8font[128] = {
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // NUL (0x00)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // SOH (0x01)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // STX (0x02)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // ETX (0x03)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // EOT (0x04)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // ENQ (0x05)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // ACK (0x06)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // BEL (0x07)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // BS  (0x08)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // TAB (0x09)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // LF  (0x0A)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // VT  (0x0B)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // FF  (0x0C)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // CR  (0x0D)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // SO  (0x0E)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // SI  (0x0F)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // DLE (0x10)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // DC1 (0x11)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // DC2 (0x12)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // DC3 (0x13)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // DC4 (0x14)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // NAK (0x15)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // SYN (0x16)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // ETB (0x17)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // CAN (0x18)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // EM  (0x19)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // SUB (0x1A)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // ESC (0x1B)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // FS  (0x1C)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // GS  (0x1D)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // RS  (0x1E)
-            0b0000'0000'0000'0000'0000'0000'0000'0000, // US  (0x1F)
+        constexpr static inline uint32_t ascii4x8_unkown = ~0b0000'0100'1010'0010'0100'0000'0100'0000;
+        static inline const uint32_t ascii4x8font[] = {
+            ascii4x8_unkown, // NUL (0x00)
+            ascii4x8_unkown, // SOH (0x01)
+            ascii4x8_unkown, // STX (0x02)
+            ascii4x8_unkown, // ETX (0x03)
+            ascii4x8_unkown, // EOT (0x04)
+            ascii4x8_unkown, // ENQ (0x05)
+            ascii4x8_unkown, // ACK (0x06)
+            ascii4x8_unkown, // BEL (0x07)
+            ascii4x8_unkown, // BS  (0x08)
+            ascii4x8_unkown, // TAB (0x09)
+            ascii4x8_unkown, // LF  (0x0A)
+            ascii4x8_unkown, // VT  (0x0B)
+            ascii4x8_unkown, // FF  (0x0C)
+            ascii4x8_unkown, // CR  (0x0D)
+            ascii4x8_unkown, // SO  (0x0E)
+            ascii4x8_unkown, // SI  (0x0F)
+            ascii4x8_unkown, // DLE (0x10)
+            ascii4x8_unkown, // DC1 (0x11)
+            ascii4x8_unkown, // DC2 (0x12)
+            ascii4x8_unkown, // DC3 (0x13)
+            ascii4x8_unkown, // DC4 (0x14)
+            ascii4x8_unkown, // NAK (0x15)
+            ascii4x8_unkown, // SYN (0x16)
+            ascii4x8_unkown, // ETB (0x17)
+            ascii4x8_unkown, // CAN (0x18)
+            ascii4x8_unkown, // EM  (0x19)
+            ascii4x8_unkown, // SUB (0x1A)
+            ascii4x8_unkown, // ESC (0x1B)
+            ascii4x8_unkown, // FS  (0x1C)
+            ascii4x8_unkown, // GS  (0x1D)
+            ascii4x8_unkown, // RS  (0x1E)
+            ascii4x8_unkown, // US  (0x1F)
             0b0000'0000'0000'0000'0000'0000'0000'0000, // SPACE (0x20)
-
             0b0000'0100'0100'0100'0100'0000'0100'0000, // ! (0x21)
             0b0000'1010'1010'0000'0000'0000'0000'0000, // " (0x22)
             0b0000'1010'1110'1010'1010'1110'1010'0000, // # (0x23)
@@ -406,7 +415,7 @@ namespace ohtoai::rpi {
             0b0000'1100'1010'1010'1100'1000'1000'0000, // 'P'
             0b0000'0100'1010'1010'1010'1010'0100'0010, // 'Q'
             0b0000'1100'1010'1010'1100'1010'1010'0000, // 'R'
-            0b0000'0111'1000'0100'0010'0010'1100'0000, // 'S'
+            0b0000'0110'1000'0100'0010'0010'1100'0000, // 'S'
             0b0000'1110'0100'0100'0100'0100'0100'0000, // 'T'
             0b0000'1010'1010'1010'1010'1010'1110'0000, // 'U'
             0b0000'1010'1010'1010'1010'1100'1000'0000, // 'V'
@@ -422,14 +431,43 @@ namespace ohtoai::rpi {
             0b0000'0000'0000'0000'0000'0000'0000'1110, // _ (0x5F)
             0b0000'0100'0010'0000'0000'0000'0000'0000, // ` (0x60)
 
-            // todo
             // a-z
-            
+            0b0000'0000'0000'0110'1010'1010'0110'0000, // 'a'
+            0b0000'1000'1000'1100'1010'1010'1100'0000, // 'b'
+            0b0000'0000'0000'0110'1000'1000'0110'0000, // 'c'
+            0b0000'0010'0010'0110'1010'1010'0110'0000, // 'd'
+            0b0000'0000'0000'0110'1010'1100'0110'0000, // 'e'
+            0b0000'0010'0100'1110'0100'0100'0100'0000, // 'f'
+            0b0000'0000'0000'0110'1010'0110'0010'1100, // 'g'
+            0b0000'1000'1000'1100'1010'1010'1010'0000, // 'h'
+            0b0000'0100'0000'1100'0100'0100'1110'0000, // 'i'
+            0b0000'0010'0000'1110'0010'0010'0010'1100, // 'j'
+            0b0000'1000'1000'1010'1100'1010'1010'0000, // 'k'
+            0b0000'1100'0100'0100'0100'0100'0110'0000, // 'l'
+            0b0000'0000'0000'1100'1110'1110'1010'0000, // 'm'
+            0b0000'0000'0000'1100'1010'1010'1010'0000, // 'n'
+            0b0000'0000'0000'0100'1010'1010'0100'0000, // 'o'
+            0b0000'0000'0000'1100'1010'1010'1100'1000, // 'p'
+            0b0000'0000'0000'0110'1010'1010'0110'0010, // 'q'
+            0b0000'0000'0000'1010'1100'1000'1000'0000, // 'r'
+            0b0000'0000'0000'0110'1100'0110'1100'0000, // 's'
+            0b0000'0000'0100'1110'0100'0100'0010'0000, // 't'
+            0b0000'0000'0000'1010'1010'1010'0110'0000, // 'u'
+            0b0000'0000'0000'1010'1010'1100'1000'0000, // 'v'
+            0b0000'0000'0000'1010'1010'1110'1110'0000, // 'w'
+            0b0000'0000'0000'1010'0100'1010'1010'0000, // 'x'
+            0b0000'0000'0000'1010'1010'0110'0010'1100, // 'y'
+            0b0000'0000'0000'1110'0100'1000'1110'0000, // 'z'
 
+            0b0000'0010'0100'0100'1000'0100'0100'0010, // { (0x7B)
+            0b0000'0100'0100'0100'0100'0100'0100'0100, // | (0x7C)
+            0b0000'1000'0100'0100'0010'0100'0100'1000, // } (0x7D)
+            0b0000'0000'0000'1100'0110'0000'0000'0000, // ~ (0x7E)
+            ascii4x8_unkown, // DEL (0x7F)
         };
         char c_;
-        LedColor color_;
-        LedColor back_;
+        LedColor color_ = Led::White;
+        LedColor back_ = Led::Black;
     };
 
     class WS2811Strip : public IRotatablePaintDevice<ISnakeStripIndex>, protected ws2811_t {
@@ -483,4 +521,87 @@ namespace ohtoai::rpi {
             return channel[0].leds[index(x, y)];
         }
     };
+
+    class Text4x8 : public IPaintSource {
+    public:
+        Text4x8(const std::string& text, LedColor color = Led::White, LedColor back = Led::Black) : text_(text), color_(color), back_(back) {}
+        int width() const override { return text_.size() * 4; }
+        int height() const override { return 8; }
+        const LedColor& led(int x, int y) const override {
+            if (x >= 0 && x < width() && y >= 0 && y < height()) {
+                return (Ascii4x8::ascii4x8font[text_[x / 4]] & (1 << (y * 4 + 3 - x % 4))) ? color_ : back_;
+            }
+            throw std::out_of_range("Text4x8::led");
+        }
+
+        auto& set_color(LedColor color) { 
+            color_ = color; 
+            return *this;
+        }
+
+        std::string& text() { return text_; }
+        const std::string& text() const { return text_; }
+    private:
+        std::string text_;
+        LedColor color_ = Led::White;
+        LedColor back_ = Led::Black;
+    };
+
+    class Window : public IRotatablePaintDevice<IVectorStripIndex> {
+    public:
+        Window(int x, int y, int w, int h, Window* parent = nullptr) 
+            : IRotatablePaintDevice<IVectorStripIndex>(w, h),
+            x_(x), y_(y),
+            leds_(w * h) {
+                if (parent) {
+                    parent->children_.push_back(this);
+                    parent_ = parent;
+                }
+            }
+
+        LedColor& led(int x, int y) override { return leds_[index(x, y)]; }
+        const LedColor& led(int x, int y) const override { 
+            for (const auto& child : children_) {
+                if (x >= child->x_ && x < child->x_ + child->width_ && y >= child->y_ && y < child->y_ + child->height_) {
+                    auto& child_led = child->led(x - child->x_, y - child->y_);
+                    if (transparent_ && child_led != back_)
+                        return child_led;
+                }
+            }
+            return leds_[index(x, y)]; 
+        }
+
+        void move(int x, int y) {
+            x_ = x;
+            y_ = y;
+        }
+
+        int x() const { return x_; }
+        int y() const { return y_; }
+
+        ~Window() {
+            if (parent_) {
+                auto it = std::find(parent_->children_.begin(), parent_->children_.end(), this);
+                if (it != parent_->children_.end()) {
+                    parent_->children_.erase(it);
+                }
+            }
+        }
+    private:
+        int x_;
+        int y_;
+        Window* parent_ = nullptr;
+        std::vector<LedColor> leds_;
+        std::vector<Window*> children_;
+    };
+
+    namespace literal {
+        inline Text4x8 operator""_t(const char* text, size_t size) {
+            return Text4x8(std::string(text, size));
+        }
+
+        inline Digit3x5 operator""_d(unsigned long long digit) {
+            return Digit3x5(digit);
+        }
+    }
 }
