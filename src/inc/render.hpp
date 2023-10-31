@@ -4,6 +4,7 @@
 #include <vector>
 #include <stdexcept>
 #include <memory>
+#include <unordered_map>
 #include <spdlog/spdlog.h>
 
 namespace ohtoai::rpi {
@@ -534,8 +535,8 @@ namespace ohtoai::rpi {
             throw std::out_of_range("Text4x8::led");
         }
 
-        auto& set_color(LedColor color) { 
-            color_ = color; 
+        auto& set_color(LedColor color) {
+            color_ = color;
             return *this;
         }
 
@@ -549,50 +550,72 @@ namespace ohtoai::rpi {
 
     class Window : public IRotatablePaintDevice<IVectorStripIndex> {
     public:
-        Window(int x, int y, int w, int h, Window* parent = nullptr) 
+        Window(int w, int h, Window* parent = nullptr)
+            : Window(w, h, parent, 0, 0) {}
+        Window(int w, int h, Window* parent, int x, int y)
             : IRotatablePaintDevice<IVectorStripIndex>(w, h),
-            x_(x), y_(y),
             leds_(w * h) {
                 if (parent) {
-                    parent->children_.push_back(this);
+                    parent->children_[this] = {x, y};
                     parent_ = parent;
                 }
             }
 
+        auto& add(IPaintSource* child, int x, int y) {
+            children_[child] = {x, y};
+            return *this;
+        }
+
         LedColor& led(int x, int y) override { return leds_[index(x, y)]; }
-        const LedColor& led(int x, int y) const override { 
+        const LedColor& led(int x, int y) const override {
             for (const auto& child : children_) {
-                if (x >= child->x_ && x < child->x_ + child->width_ && y >= child->y_ && y < child->y_ + child->height_) {
-                    auto& child_led = child->led(x - child->x_, y - child->y_);
+                if (x >= child.second.x && x < child.second.x + child.first->width() && y >= child.second.y && y < child.second.y + child.first->height()) {
+                    auto& child_led = child.first->led(x - child.second.x, y - child.second.y);
                     if (transparent_ && child_led != back_)
                         return child_led;
                 }
             }
-            return leds_[index(x, y)]; 
+            return leds_[index(x, y)];
         }
 
         void move(int x, int y) {
-            x_ = x;
-            y_ = y;
+            if (parent_) {
+                parent_->children_[this] = {x, y};
+            }
         }
 
-        int x() const { return x_; }
-        int y() const { return y_; }
+        int x() const {
+            if (parent_) {
+                auto it = parent_->children_.find(this);
+                if (it != parent_->children_.end()) {
+                    return it->second.x;
+                }
+            }
+            return 0;
+         }
+        int y() const {
+            if (parent_) {
+                auto it = parent_->children_.find(this);
+                if (it != parent_->children_.end()) {
+                    return it->second.y;
+                }
+            }
+            return 0;
+         }
 
         ~Window() {
             if (parent_) {
-                auto it = std::find(parent_->children_.begin(), parent_->children_.end(), this);
+                auto it = parent_->children_.find(this);
                 if (it != parent_->children_.end()) {
                     parent_->children_.erase(it);
                 }
             }
         }
     private:
-        int x_;
-        int y_;
         Window* parent_ = nullptr;
         std::vector<LedColor> leds_;
-        std::vector<Window*> children_;
+        using PaintSourcePos = struct {int x; int y;};
+        std::unordered_map<const IPaintSource*, PaintSourcePos> children_;
     };
 
     namespace literal {
