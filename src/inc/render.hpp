@@ -11,7 +11,7 @@ namespace ohtoai::rpi {
     using LedColor = ws2811_led_t;
 
     enum Led: LedColor {
-        White = 0xffff,
+        White = 0xffffff,
         Red = 0xff0000,
         Green = 0x00ff00,
         Blue = 0x0000ff,
@@ -98,22 +98,22 @@ namespace ohtoai::rpi {
 
     class IPaintDevice: public IPaintSource {
     public:
-        IPaintDevice() = default;
+        IPaintDevice(LedColor back = Led::Black) : back(back) {};
         virtual ~IPaintDevice() = default;
-        virtual LedColor& led(int x, int y) = 0;
+        virtual LedColor& led_ref(int x, int y) = 0;
         virtual const LedColor& led(int x, int y) const = 0;
         virtual void set_transparent(bool transparent) {
             transparent_ = transparent;
         }
 
         virtual void set_background(LedColor color) {
-            back_ = color;
+            back = color;
         }
 
         virtual void clear() {
             for (int y = 0; y < height(); ++y) {
                 for (int x = 0; x < width(); ++x) {
-                    led(x, y) = back_;
+                    led_ref(x, y) = back;
                 }
             }
         }
@@ -134,10 +134,10 @@ namespace ohtoai::rpi {
                         continue;
                     }
                     auto src_led = src.led(sx, sy);
-                    if (transparent_ && src_led == back_) {
+                    if (transparent_ && src_led == back) {
                         continue;
                     }
-                    led(x + dx, y + dy) = src_led;
+                    led_ref(x + dx, y + dy) = src_led;
                 }
             }
         }
@@ -148,21 +148,25 @@ namespace ohtoai::rpi {
                     int dx = flip_x ? width() - x - 1 : x;
                     int dy = flip_y ? height() - y - 1 : y;
                     auto tmp = led(x, y);
-                    led(x, y) = led(dx, dy);
-                    led(dx, dy) = tmp;
+                    led_ref(x, y) = led(dx, dy);
+                    led_ref(dx, dy) = tmp;
                 }
             }
         }
 
     protected:
         bool transparent_ = false;
-        LedColor back_ = Led::Black;
+        LedColor back = Led::Black;
     };
 
     template <typename StripIndexType = ISnakeStripIndex>
     class IRotatablePaintDevice: public IPaintDevice {
     public:
-        IRotatablePaintDevice(int w, int h): width_(w), height_(h), logic_width_(w), logic_height_(h), rotate_helper_(std::make_shared<StripRotateHelper<StripIndexType, 0, false, false>>(width_, height_)) {};
+        IRotatablePaintDevice(int w, int h, LedColor back = Led::Black)
+            : width_(w), height_(h),
+            IPaintDevice(back),
+            logic_width_(w), logic_height_(h),
+            rotate_helper_(std::make_shared<StripRotateHelper<StripIndexType, 0, false, false>>(width_, height_)) {};
         virtual ~IRotatablePaintDevice() = default;
         virtual int width() const override { return logic_width_; }
         virtual int height() const override { return logic_height_; }
@@ -266,18 +270,35 @@ namespace ohtoai::rpi {
 
     class Pixmap : public IRotatablePaintDevice<IVectorStripIndex> {
     public:
-        Pixmap(int w, int h)
-            : IRotatablePaintDevice<IVectorStripIndex>(w, h),
+        Pixmap(int w, int h, LedColor back = Led::Black)
+            : IRotatablePaintDevice<IVectorStripIndex>(w, h, back),
             leds_(w * h) {}
-        LedColor& led(int x, int y) override { return leds_[index(x, y)]; }
+        LedColor& led_ref(int x, int y) override { return leds_[index(x, y)]; }
         const LedColor& led(int x, int y) const override { return leds_[index(x, y)]; }
     private:
         std::vector<LedColor> leds_;
     };
 
-    class Digit3x5 : public IPaintSource {
+    class SimpleAlphaGroup : public IPaintSource {
     public:
-        Digit3x5(int digit, LedColor color = Led::White, LedColor back = Led::Black) : digit(digit), color(color), back(back) {}
+        SimpleAlphaGroup(LedColor color = Led::White, LedColor back = Led::Black)
+            : color(color), back(back) { }
+        auto& set_color(LedColor color) {
+            this->color = color;
+            return *this;
+        }
+        auto& set_background(LedColor color) {
+            this->back = color;
+            return *this;
+        }
+        LedColor color;
+        LedColor back;
+    };
+
+    class Digit3x5 : public SimpleAlphaGroup {
+        friend class DigitGroup3x5;
+    public:
+        Digit3x5(int digit, LedColor color = Led::White, LedColor back = Led::Black) : digit(digit), SimpleAlphaGroup(color, back) {}
         int width() const override { return 3; }
         int height() const override { return 5; }
         const LedColor& led(int x, int y) const override {
@@ -288,8 +309,6 @@ namespace ohtoai::rpi {
         }
 
         int digit;
-        LedColor color;
-        LedColor back;
     private:
         static inline uint16_t digit3x5font[] = {
             0b0'111'101'101'101'111, // 0
@@ -305,26 +324,20 @@ namespace ohtoai::rpi {
         };
     };
 
-    class Ascii4x8 : public IPaintSource {
+    class Ascii4x8 : public SimpleAlphaGroup {
         friend class Text4x8;
     public:
-        Ascii4x8(char c, LedColor color = Led::White, LedColor back = Led::Black) : c_(c), color_(color), back_(back) {}
+        Ascii4x8(char c, LedColor color = Led::White, LedColor back = Led::Black) : c(c), SimpleAlphaGroup(color, back) {}
         int width() const override { return 4; }
         int height() const override { return 8; }
         const LedColor& led(int x, int y) const override {
-            if (c_ >= 0 && c_ < sizeof(ascii4x8font) / sizeof(ascii4x8font[0]) && x >= 0 && x < 4 && y >= 0 && y < 8) {
-                return (ascii4x8font[c_] & (1 << (y * 4 + 3 - x))) ? color_ : back_;
+            if (c >= 0 && c < sizeof(ascii4x8font) / sizeof(ascii4x8font[0]) && x >= 0 && x < 4 && y >= 0 && y < 8) {
+                return (ascii4x8font[c] & (1 << (y * 4 + 3 - x))) ? color : back;
             }
             throw std::out_of_range("Ascii4x8::led");
         }
 
-        auto& set_color(LedColor color) { 
-            color_ = color; 
-            return *this;
-        }
-
-        char& c() { return c_; }
-        char c() const { return c_; }
+        char c;
     private:
         constexpr static inline uint32_t ascii4x8_unkown = ~0b0000'0100'1010'0010'0100'0000'0100'0000;
         static inline const uint32_t ascii4x8font[] = {
@@ -466,16 +479,13 @@ namespace ohtoai::rpi {
             0b0000'0000'0000'1100'0110'0000'0000'0000, // ~ (0x7E)
             ascii4x8_unkown, // DEL (0x7F)
         };
-        char c_;
-        LedColor color_ = Led::White;
-        LedColor back_ = Led::Black;
     };
 
     class WS2811Strip : public IRotatablePaintDevice<ISnakeStripIndex>, protected ws2811_t {
         enum {DMA = 10, GPIO_PIN = 18};
     public:
-        WS2811Strip(int w = 8, int h = 8)
-            : IRotatablePaintDevice<ISnakeStripIndex>(w, h), ws2811_t() {
+        WS2811Strip(int w = 8, int h = 8, LedColor back = Led::Black)
+            : IRotatablePaintDevice<ISnakeStripIndex>(w, h, back), ws2811_t() {
             freq = WS2811_TARGET_FREQ;
             dmanum = DMA;
             channel[0].gpionum = GPIO_PIN;
@@ -499,7 +509,8 @@ namespace ohtoai::rpi {
         }
 
         auto init() {
-            return ws2811_init(this);
+            auto ret = ws2811_init(this);
+            spdlog::debug("WS2811Strip::init {} {}", (void*)this, ws2811_get_return_t_str(ret));
         }
 
         auto wait() {
@@ -515,7 +526,7 @@ namespace ohtoai::rpi {
             return ws2811_fini(this);
         }
     public:
-        LedColor& led(int x, int y) override {
+        LedColor& led_ref(int x, int y) override {
             return channel[0].leds[index(x, y)];
         }
         const LedColor& led(int x, int y) const override {
@@ -523,29 +534,58 @@ namespace ohtoai::rpi {
         }
     };
 
-    class Text4x8 : public IPaintSource {
+    /// @brief 3x5 digits group, contains variable number of digits
+    class DigitGroup3x5 : public SimpleAlphaGroup {
     public:
-        Text4x8(const std::string& text, LedColor color = Led::White, LedColor back = Led::Black) : text_(text), color_(color), back_(back) {}
-        int width() const override { return text_.size() * 4; }
+        DigitGroup3x5(int digits, LedColor color = Led::White, LedColor back = Led::Black)
+            : SimpleAlphaGroup(color, back) {
+                set_digits(digits);
+        }
+        int width() const override { 
+            return digits_width_ * 3;
+         }
+        int height() const override { return 5; }
+        const LedColor& led(int x, int y) const override {
+            if (x >= 0 && x < width() && y >= 0 && y < height()) {
+                auto digit = (digits_ / (int)std::pow(10, digits_width_ - x / 3 - 1)) % 10;
+                return (Digit3x5::digit3x5font[digit] & (1 << (y * 3 + 2 - x % 3))) ? color : back;
+            }
+            throw std::out_of_range("DigitGroup3x5::led");
+        }
+
+        int digits() const { return digits_; }
+        DigitGroup3x5& set_digits(int digits) {
+            if (digits < 0)
+                digits = -digits;
+            digits_ = digits;
+            digits_width_ = 0;
+            while (digits != 0) {
+                digits_width_++;
+                digits /= 10;
+            }
+            return *this;
+        }
+        
+    protected:
+        int digits_;
+        mutable int digits_width_;
+    };
+
+    class Text4x8 : public SimpleAlphaGroup {
+    public:
+        Text4x8(const std::string& text, LedColor color = Led::White, LedColor back = Led::Black)
+            : text(text), SimpleAlphaGroup(color, back) {}
+        int width() const override { return text.size() * 4; }
         int height() const override { return 8; }
         const LedColor& led(int x, int y) const override {
             if (x >= 0 && x < width() && y >= 0 && y < height()) {
-                return (Ascii4x8::ascii4x8font[text_[x / 4]] & (1 << (y * 4 + 3 - x % 4))) ? color_ : back_;
+                return (Ascii4x8::ascii4x8font[text[x / 4]] & (1 << (y * 4 + 3 - x % 4))) ? color : back;
             }
             throw std::out_of_range("Text4x8::led");
         }
 
-        auto& set_color(LedColor color) {
-            color_ = color;
-            return *this;
-        }
-
-        std::string& text() { return text_; }
-        const std::string& text() const { return text_; }
+        std::string text;
     private:
-        std::string text_;
-        LedColor color_ = Led::White;
-        LedColor back_ = Led::Black;
     };
 
     class Window : public IRotatablePaintDevice<IVectorStripIndex> {
@@ -555,24 +595,32 @@ namespace ohtoai::rpi {
         Window(int w, int h, Window* parent, int x, int y)
             : IRotatablePaintDevice<IVectorStripIndex>(w, h),
             leds_(w * h) {
+                spdlog::debug("Window::Window {} {}x{} @ {}, {}", (void*)this, width(), height(), x, y);
                 if (parent) {
-                    parent->children_[this] = {x, y};
-                    parent_ = parent;
+                    parent->add(this, x, y);
                 }
             }
 
-        auto& add(IPaintSource* child, int x, int y) {
+        Window& add(IPaintSource* child, int x, int y) {
+            spdlog::debug("Window::add {}->{} {}x{} @ {}, {}", (void*)this, (void*)child, width(), height(), x, y);
             children_[child] = {x, y};
+            if (auto window = dynamic_cast<Window*>(child)) {
+                if (window->parent_) {
+                    window->parent_->remove(window);
+                }
+                window->parent_ = this;
+            }
             return *this;
         }
 
-        LedColor& led(int x, int y) override { return leds_[index(x, y)]; }
+        LedColor& led_ref(int x, int y) override { return leds_[index(x, y)]; }
         const LedColor& led(int x, int y) const override {
             for (const auto& child : children_) {
                 if (x >= child.second.x && x < child.second.x + child.first->width() && y >= child.second.y && y < child.second.y + child.first->height()) {
                     auto& child_led = child.first->led(x - child.second.x, y - child.second.y);
-                    if (transparent_ && child_led != back_)
-                        return child_led;
+                    if (transparent_ && child_led == back)
+                        continue;
+                    return child_led;
                 }
             }
             return leds_[index(x, y)];
@@ -582,6 +630,15 @@ namespace ohtoai::rpi {
             if (parent_) {
                 parent_->children_[this] = {x, y};
             }
+        }
+
+        Window& remove(IPaintSource* child) {
+            spdlog::debug("Window::remove {}->{}", (void*)this, (void*)child);
+            children_.erase(child);
+            if (auto window = dynamic_cast<Window*>(child)) {
+                window->parent_ = nullptr;
+            }
+            return *this;
         }
 
         int x() const {
@@ -603,12 +660,13 @@ namespace ohtoai::rpi {
             return 0;
          }
 
+         size_t children_count() const {
+             return children_.size();
+         }
+
         ~Window() {
             if (parent_) {
-                auto it = parent_->children_.find(this);
-                if (it != parent_->children_.end()) {
-                    parent_->children_.erase(it);
-                }
+                parent_->remove(this);
             }
         }
     private:
@@ -618,13 +676,39 @@ namespace ohtoai::rpi {
         std::unordered_map<const IPaintSource*, PaintSourcePos> children_;
     };
 
+    class WS2811StripFakeDeviceDebug : public Window {
+    public:
+        WS2811StripFakeDeviceDebug(int w = 8, int h = 8)
+            : Window(w, h) {}
+        ~WS2811StripFakeDeviceDebug() {
+            spdlog::debug("WS2811StripFakeDeviceDebug::~WS2811StripFakeDeviceDebug {}", (void*)this);
+        }
+
+        auto init() {
+            spdlog::debug("WS2811StripFakeDeviceDebug::init {}", (void*)this);
+            return 0;
+        }
+
+        auto render() {
+            spdlog::debug("WS2811StripFakeDeviceDebug::render {} {}x{}", (void*)this, width(), height());
+            for (int y = 0; y < height(); y++) {
+                std::string line;
+                for (int x = 0; x < width(); x++) {
+                    line += led(x, y) == Led::Black ? ' ' : '*';
+                }
+                spdlog::debug("WS2811StripFakeDeviceDebug::render {}", line);
+            }
+            return 0;
+        }
+    };
+
     namespace literal {
-        inline Text4x8 operator""_t(const char* text, size_t size) {
+        inline Text4x8 operator""_d(const char* text, size_t size) {
             return Text4x8(std::string(text, size));
         }
 
-        inline Digit3x5 operator""_d(unsigned long long digit) {
-            return Digit3x5(digit);
+        inline DigitGroup3x5 operator""_d(unsigned long long digits) {
+            return DigitGroup3x5(digits);
         }
     }
 }
