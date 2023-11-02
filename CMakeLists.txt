@@ -42,6 +42,7 @@ endif()
 if (RASPBERRY_PI)
     add_compile_definitions(RASPBERRY_PI)
 endif()
+add_compile_definitions(MSGPACK_NO_BOOST)
 
 if(GENERATE_CODE_COVERAGE AND LINUX AND CMAKE_BUILD_TYPE MATCHES Debug)
     include(CodeCoverage)
@@ -53,6 +54,7 @@ find_package(Threads REQUIRED)
 
 # include top level include directory
 include_directories(${PROJECT_SOURCE_DIR}/inc)
+include_directories(${PROJECT_SOURCE_DIR}/3rd/inc)
 include_directories(${PROJECT_BINARY_DIR}/inc)
 
 add_subdirectory(3rd)
